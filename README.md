@@ -41,24 +41,49 @@ Simple health check for monitoring.
 ## Local Development
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.12 or 3.13 (recommended for compatibility)
+  - **Note:** Python 3.14 is not yet supported by `numba` (a librosa dependency)
+  - The Dockerfile uses Python 3.12 for deployment
 - pip
 
 ### Installation
 
-1. Install dependencies:
+1. **Create a virtual environment** (recommended):
+   ```bash
+   # Using Python 3.12 (recommended for compatibility)
+   python3.12 -m venv venv
+   
+   # Activate the virtual environment
+   source venv/bin/activate
+   
+   # Or if using pyenv with Python 3.12:
+   pyenv install 3.12.7
+   pyenv local 3.12.7
+   python -m venv venv
+   source venv/bin/activate
+   ```
+
+2. Install dependencies:
 ```bash
+# Make sure virtual environment is activated first
 pip install -r requirements.txt
 ```
 
-2. Run the server:
+3. Run the server:
 ```bash
+# Make sure virtual environment is activated
 python main.py
 ```
 
 Or with uvicorn directly:
 ```bash
+# Make sure virtual environment is activated
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**Note:** Always activate your virtual environment before running the server:
+```bash
+source venv/bin/activate
 ```
 
 The API will be available at `http://localhost:8000`
