@@ -5,6 +5,7 @@ import numpy as np
 import tempfile
 import os
 import logging
+import soundfile as sf
 from typing import Dict
 
 # Configure logging
@@ -86,89 +87,53 @@ async def detect_bpm(file: UploadFile = File(...)) -> Dict:
         logger.info(f"Temporary file created: {temp_file_path}")
         
         # Load audio file with librosa
-        logger.info("Loading audio file with librosa...")
-        y, sr = librosa.load(temp_file_path, sr=None, duration=None)
-        logger.info(f"Audio loaded: duration={len(y)/sr:.2f}s, sample_rate={sr}Hz")
+        # For large files, only process first 30 seconds (enough for accurate BPM detection)
+        # This prevents timeouts and speeds up processing significantly
+        max_duration = 30.0  # seconds
+        logger.info(f"Loading audio file with librosa (max {max_duration}s for BPM detection)...")
+        
+        # Load with duration limit and resample to 22050Hz for faster processing
+        y, sr = librosa.load(
+            temp_file_path, 
+            sr=22050,  # Resample to 22050Hz (standard for music analysis, faster processing)
+            duration=max_duration,  # Only process first 60 seconds
+            mono=True  # Convert to mono for faster processing
+        )
+        
+        actual_duration = len(y) / sr
+        logger.info(f"Audio loaded: duration={actual_duration:.2f}s, sample_rate={sr}Hz")
         
         if len(y) == 0:
             raise HTTPException(status_code=400, detail="Audio file appears to be empty or corrupted")
         
-        # Use multiple methods for more accurate BPM detection
+        # Warn if file was truncated
+        if actual_duration >= max_duration:
+            logger.info(f"Note: Processing first {max_duration}s of audio for BPM detection (file is longer)")
+        
+        # Fast BPM detection using single method
         logger.info("Computing onset strength envelope...")
-        onset_env = librosa.onset.onset_strength(y=y, sr=sr, aggregate=np.median)
-        
-        # Method 1: Standard beat tracking (most reliable)
-        logger.info("Method 1: Beat tracking...")
-        tempo1, beats1 = librosa.beat.beat_track(
-            onset_envelope=onset_env,
-            sr=sr,
-            units='tempo'
-        )
-        tempo1 = float(tempo1)
-        logger.info(f"Method 1 result: {tempo1:.2f} BPM")
-        
-        # Method 2: Tempo estimation with dynamic programming
-        logger.info("Method 2: Dynamic programming tempo estimation...")
-        tempo2 = librosa.beat.tempo(
-            onset_envelope=onset_env,
-            sr=sr,
+        onset_env = librosa.onset.onset_strength(
+            y=y, 
+            sr=sr, 
             aggregate=np.median,
-            start_bpm=60.0,
-            std_bpm=1.0
+            hop_length=512
         )
-        tempo2 = float(tempo2)
-        logger.info(f"Method 2 result: {tempo2:.2f} BPM")
+        logger.info(f"Onset envelope computed: {len(onset_env)} frames")
         
-        # Method 3: Tempo estimation with multiple candidates
-        logger.info("Method 3: Multi-candidate tempo estimation...")
-        tempo3_array = librosa.beat.tempo(
+        # Standard beat tracking (most reliable and fastest)
+        logger.info("Detecting BPM using beat tracking...")
+        tempo, beats = librosa.beat.beat_track(
             onset_envelope=onset_env,
             sr=sr,
-            aggregate=None,
-            start_bpm=60.0,
-            std_bpm=1.0
+            units='tempo',
+            hop_length=512
         )
-        # Filter out unrealistic values (between 60-200 BPM typically)
-        tempo3_array = tempo3_array[(tempo3_array >= 60) & (tempo3_array <= 200)]
-        if len(tempo3_array) > 0:
-            tempo3 = float(np.median(tempo3_array))
-            tempo_std = float(np.std(tempo3_array))
-        else:
-            tempo3 = tempo1  # Fallback to method 1
-            tempo_std = 0.0
-        logger.info(f"Method 3 result: {tempo3:.2f} BPM (std: {tempo_std:.2f})")
+        bpm = float(tempo)
+        logger.info(f"Detected BPM: {bpm:.2f}")
         
-        # Combine results - use median of all methods for robustness
-        tempos = [t for t in [tempo1, tempo2, tempo3] if 60 <= t <= 200]
-        if not tempos:
-            tempos = [tempo1]  # Fallback
-        
-        accurate_bpm = float(np.median(tempos))
-        
-        # Calculate confidence based on agreement between methods
-        if len(tempos) >= 2:
-            tempo_variance = np.var(tempos)
-            confidence = max(0.0, min(1.0, 1.0 - (tempo_variance / 400.0)))
-        else:
-            confidence = 0.7  # Lower confidence if only one method
-        
-        # Ensure BPM is in reasonable range
-        if accurate_bpm < 60:
-            accurate_bpm *= 2  # Might be half-time
-        elif accurate_bpm > 200:
-            accurate_bpm /= 2  # Might be double-time
-        
-        logger.info(f"Final BPM: {accurate_bpm:.2f}, Confidence: {confidence:.2f}")
-        
+        # Simple result
         result = {
-            "bpm": round(accurate_bpm, 2),
-            "filename": file.filename,
-            "confidence": round(confidence, 2),
-            "sample_rate": int(sr),
-            "duration_seconds": round(len(y) / sr, 2),
-            "method1_bpm": round(tempo1, 2),
-            "method2_bpm": round(tempo2, 2),
-            "method3_bpm": round(tempo3, 2)
+            "bpm": round(bpm, 2)
         }
         
         logger.info(f"Returning result: {result}")
