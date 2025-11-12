@@ -125,7 +125,6 @@ async def detect_bpm(file: UploadFile = File(...)) -> Dict:
         tempo, beats = librosa.beat.beat_track(
             onset_envelope=onset_env,
             sr=sr,
-            units='tempo',
             hop_length=512
         )
         bpm = float(tempo)
