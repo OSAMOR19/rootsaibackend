@@ -87,17 +87,18 @@ async def detect_bpm(file: UploadFile = File(...)) -> Dict:
         logger.info(f"Temporary file created: {temp_file_path}")
         
         # Load audio file with librosa
-        # For large files, only process first 30 seconds (enough for accurate BPM detection)
-        # This prevents timeouts and speeds up processing significantly
-        max_duration = 30.0  # seconds
+        # Only process first 15 seconds for FAST BPM detection (enough for accurate results)
+        # This prevents timeouts and ensures super fast processing
+        max_duration = 15.0  # seconds
         logger.info(f"Loading audio file with librosa (max {max_duration}s for BPM detection)...")
         
-        # Load with duration limit and resample to 22050Hz for faster processing
+        # Load with duration limit and resample to lower sample rate for SPEED
         y, sr = librosa.load(
             temp_file_path, 
-            sr=22050,  # Resample to 22050Hz (standard for music analysis, faster processing)
-            duration=max_duration,  # Only process first 60 seconds
-            mono=True  # Convert to mono for faster processing
+            sr=11025,  # Lower sample rate = MUCH faster (still accurate for BPM)
+            duration=max_duration,  # Only process first 15 seconds
+            mono=True,  # Convert to mono for faster processing
+            res_type='kaiser_fast'  # Faster resampling algorithm
         )
         
         actual_duration = len(y) / sr
@@ -112,11 +113,13 @@ async def detect_bpm(file: UploadFile = File(...)) -> Dict:
         
         # Fast BPM detection using single method
         logger.info("Computing onset strength envelope...")
+        # Use larger hop_length for faster processing
+        hop_length = 1024  # Larger = faster (512 -> 1024 = 2x faster)
         onset_env = librosa.onset.onset_strength(
             y=y, 
             sr=sr, 
             aggregate=np.median,
-            hop_length=512
+            hop_length=hop_length
         )
         logger.info(f"Onset envelope computed: {len(onset_env)} frames")
         
@@ -125,7 +128,7 @@ async def detect_bpm(file: UploadFile = File(...)) -> Dict:
         tempo, beats = librosa.beat.beat_track(
             onset_envelope=onset_env,
             sr=sr,
-            hop_length=512
+            hop_length=hop_length
         )
         bpm = float(tempo)
         logger.info(f"Detected BPM: {bpm:.2f}")
